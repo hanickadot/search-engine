@@ -1,0 +1,6 @@
+[submodule "external/co_curl"]
+	path = external/co_curl
+	url = https://github.com/hanickadot/co_curl.git
+[submodule "external/ctre"]
+	path = external/ctre
+	url = https://github.com/hanickadot/compile-time-regular-expressions.git

@@ -1,0 +1,15 @@
+CLANG_FORMAT_ON_SAVE = true
+
+excludeDirectories = "{$excludeDirectories,build}"
+includeDirectories = "{$includeDirectories}"
+include = "{$include,.gitignore,.gitattributes,.clang-format,.github}"
+excludeInFolderSearch = "{$excludeInFolderSearch,build,external}" 
+includeInFolderSearch = "{$includeInFolderSearch}"
+excludeInFileChooser = "{$excludeInFileChooser}" 
+
+softTabs = false
+tabSize = 4
+
+[*.yml]
+softTabs = true
+tabSize = 2
