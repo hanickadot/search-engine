@@ -145,7 +145,7 @@ bool ignore_tag_content(std::string_view name) {
 	}
 }
 
-auto skip_tag_or_comment_inner(std::string_view::iterator & it, const std::string_view::iterator end) noexcept -> std::optional<tag_t> {
+template <typename Attribute> auto skip_tag_or_comment_inner(std::string_view::iterator & it, const std::string_view::iterator end, Attribute && attr) noexcept -> std::optional<tag_t> {
 	if (it == end || *it != '<') {
 		return std::nullopt;
 	}
@@ -225,9 +225,9 @@ auto skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 		}
 	};
 
-	const auto skip_attribute_value = [&] {
+	const auto get_attribute_value = [&]() -> std::optional<std::string_view> {
 		if (it == end) {
-			return false;
+			return std::nullopt;
 		}
 
 		const char c = *it;
@@ -235,24 +235,28 @@ auto skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 
 		if (c == '"' || c == '\'') {
 			// unquoted
+			const auto value_begin = it;
 			while (it != end && *it != c) {
 				++it;
 			}
+			const auto value_end = it;
 			// final quote
 			if (it == end || *it != c) {
-				return false;
+				return std::nullopt;
 			}
 			++it;
-			return true;
+			return std::string_view{&*value_begin, static_cast<size_t>(std::distance(value_begin, value_end))};
 		} else {
 			// unquoted
+			const auto value_begin = it;
 			if (it != end && is_unqouted_value_char(*it)) {
 				while (it != end && is_unqouted_value_char(*it)) {
 					++it;
 				}
-				return true;
+				const auto value_end = it;
+				return std::string_view{&*value_begin, static_cast<size_t>(std::distance(value_begin, value_end))};
 			} else {
-				return false;
+				return std::nullopt;
 			}
 		}
 	};
@@ -264,16 +268,21 @@ auto skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 			return std::nullopt;
 		}
 
+		const auto attribute_start = it;
 		if (is_attribute_name_char(*it)) {
 			++it;
 			// skip attribute name
 			while (it != end && is_attribute_name_char(*it)) {
 				++it;
 			}
+			const auto attribute_end = it;
+			const auto attribute_name = std::string_view(&*attribute_start, static_cast<size_t>(std::distance(attribute_start, attribute_end)));
 
 			if (it != end && *it == '=') {
 				++it;
-				if (!skip_attribute_value()) {
+				if (auto attribute_value = get_attribute_value()) {
+					attr(tag_name, attribute_name, *attribute_value);
+				} else {
 					return std::nullopt;
 				}
 			}
@@ -312,9 +321,9 @@ auto skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 	}
 }
 
-auto skip_tag_or_comment(std::string_view::iterator & it, const std::string_view::iterator end) noexcept -> std::optional<tag_t> {
+template <typename Attribute> auto skip_tag_or_comment(std::string_view::iterator & it, const std::string_view::iterator end, Attribute && attr) noexcept -> std::optional<tag_t> {
 	auto mine = it;
-	auto result = skip_tag_or_comment_inner(mine, end);
+	auto result = skip_tag_or_comment_inner(mine, end, std::forward<Attribute>(attr));
 
 	if (result) {
 		it = mine;
@@ -440,7 +449,7 @@ std::optional<char> replacement_for_tag(const tag_t & tag) {
 	}
 }
 
-std::string_view crawler::convert_to_plain_text(std::string_view input, std::span<char> output) noexcept {
+template <typename Insert, typename Attribute> void convert_to_plain_text_ex(std::string_view input, Insert && insert, Attribute && attr) {
 	// remove <script...>...</script>
 	// remove <style...>...</style>
 	// other tags only remove <X>[content]</X> and keep content
@@ -450,17 +459,7 @@ std::string_view crawler::convert_to_plain_text(std::string_view input, std::spa
 	auto it = input.begin();
 	const auto end = input.end();
 
-	auto out = output.begin();
-	[[maybe_unused]] const auto oend = output.end();
-
-	assert(input.size() <= output.size());
-
 	auto write_character = [&, previous_space = true](char32_t c) mutable {
-		if (input.data() == output.data()) {
-			assert((std::less<void>()(&*out, &*it)));
-		}
-		assert(out != oend);
-
 		// TODO process unicode properly
 		if (c == 0x200b) {
 			return;
@@ -479,14 +478,13 @@ std::string_view crawler::convert_to_plain_text(std::string_view input, std::spa
 		}
 
 		// TODO write unicode
-		*out = static_cast<char>(c);
-		++out;
+		insert(static_cast<char>(c));
 	};
 
 	while (it != end) {
 		const char c = *it;
 		if (c == '<') {
-			if (auto tag = skip_tag_or_comment(it, end)) {
+			if (auto tag = skip_tag_or_comment(it, end, std::forward<Attribute>(attr))) {
 				if (auto replacement = replacement_for_tag(*tag)) {
 					write_character(static_cast<char32_t>(*replacement));
 				}
@@ -503,8 +501,49 @@ std::string_view crawler::convert_to_plain_text(std::string_view input, std::spa
 		write_character(static_cast<char32_t>(static_cast<unsigned char>(c)));
 		++it;
 	}
+}
+
+std::string_view crawler::convert_to_plain_text(std::string_view input, std::span<char> output) noexcept {
+	auto out = output.begin();
+
+	const auto insert_character = [&out, end = output.end()](char c) {
+		assert(out < end);
+		*out++ = c;
+	};
+
+	const auto attribute_callback = [](std::string_view, std::string_view, std::string_view) {
+		// std::cout << "['" << key << "' -> '" << value << "']\n";
+	};
+
+	assert(input.size() <= output.size());
+
+	convert_to_plain_text_ex(input, insert_character, attribute_callback);
 
 	return std::string_view(output.data(), (size_t)std::distance(output.begin(), out));
+}
+
+std::vector<crawler::id_and_text> crawler::convert_to_plain_text_by_nearest_anchor(std::string_view input) {
+	std::vector<crawler::id_and_text> output;
+
+	output.emplace_back();
+
+	const auto insert_character = [&output](char c) {
+		// TODO improve this!!
+		output.back().text.append(1u, c);
+	};
+
+	const auto attribute_callback = [&output](std::string_view tag, std::string_view key, std::string_view value) {
+		if ((tag == "div" || tag == "li") && key == "id") {
+			if (output.back().text.empty()) {
+				output.pop_back();
+			}
+			output.emplace_back(id_and_text{.id = std::string(value)});
+		}
+	};
+
+	convert_to_plain_text_ex(input, insert_character, attribute_callback);
+
+	return output;
 }
 
 std::string crawler::convert_to_plain_text(std::string && mutable_input_output) noexcept {

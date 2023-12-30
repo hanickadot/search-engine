@@ -2,6 +2,7 @@
 #include <co_curl/co_curl.hpp>
 #include <co_curl/format.hpp>
 #include <co_curl/url.hpp>
+#include <crawler/strip-tags.hpp>
 #include <ctre.hpp>
 #include <iostream>
 #include <ranges>
@@ -185,7 +186,7 @@ auto fetch_recursive(std::string requested_url, auto & check_link, auto & add_li
 		info->path.append(extension_by_mime(mime));
 	}
 
-	co_return url_content{.info = std::move(*info), .content = std::move(output)};
+	co_return url_content{.info = std::move(*info), .content = crawler::convert_to_plain_text(std::move(output))};
 }
 
 struct url_and_referer {

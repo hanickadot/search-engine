@@ -20,9 +20,15 @@ int main(int argc, char ** argv) {
 		}
 	}
 
-	std::string striped_content = crawler::convert_to_plain_text(std::move(content));
+	auto res = crawler::convert_to_plain_text_by_nearest_anchor(content);
 
-	std::cout << striped_content << "\n";
+	for (auto && [id, text]: res) {
+		std::cout << "\"" << id << "\" -> \"" << text << "\"\n\n";
+	}
+	//
+	// std::string striped_content = crawler::convert_to_plain_text(std::move(content));
+	//
+	// std::cout << striped_content << "\n";
 
 	// for (auto [a, b, c]: std::views::adjacent_view<3>(striped_content)) {
 	// }
