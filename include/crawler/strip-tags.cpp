@@ -98,10 +98,16 @@ void skip_spaces(std::string_view::iterator & it, const std::string_view::iterat
 	}
 }
 
-bool skip_ending_tag(std::string_view::iterator & it, const std::string_view::iterator end, std::optional<std::string_view> expected_tag = std::nullopt) noexcept {
+struct tag_t {
+	bool opening;
+	bool closing;
+	std::string_view name;
+};
+
+auto skip_ending_tag(std::string_view::iterator & it, const std::string_view::iterator end) noexcept -> std::optional<tag_t> {
 	// sanity check
 	if (it == end && *it != '/') {
-		return false;
+		return std::nullopt;
 	}
 
 	++it;
@@ -116,17 +122,12 @@ bool skip_ending_tag(std::string_view::iterator & it, const std::string_view::it
 	skip_spaces(it, end);
 
 	if (it == end || *it != '>') {
-		return false;
+		return std::nullopt;
 	}
 
 	++it;
 
-	if (expected_tag.has_value()) {
-		// std::cout << "[" << *expected_tag << " VS " << tag_name << "]";
-		return *expected_tag == tag_name;
-	} else {
-		return true;
-	}
+	return tag_t{.opening = false, .closing = true, .name = tag_name};
 }
 
 bool ignore_tag_content(std::string_view name) {
@@ -135,6 +136,8 @@ bool ignore_tag_content(std::string_view name) {
 		return true;
 	} else if (name == "style") {
 		return true;
+	} else if (name == "svg") {
+		return true;
 	} else if (name == "img") {
 		return true;
 	} else {
@@ -142,16 +145,16 @@ bool ignore_tag_content(std::string_view name) {
 	}
 }
 
-bool skip_tag_or_comment_inner(std::string_view::iterator & it, const std::string_view::iterator end) noexcept {
+auto skip_tag_or_comment_inner(std::string_view::iterator & it, const std::string_view::iterator end) noexcept -> std::optional<tag_t> {
 	if (it == end || *it != '<') {
-		return false;
+		return std::nullopt;
 	}
 
 	++it;
 
 	// comment
 	if (it == end) {
-		return false;
+		return std::nullopt;
 	}
 
 	if (*it == '!') {
@@ -159,7 +162,11 @@ bool skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 		auto tmp = it;
 		++tmp;
 		if (tmp != end && *tmp == '-') {
-			return skip_comment(it, end);
+			if (skip_comment(it, end)) {
+				return tag_t{.opening = true, .closing = true, .name = "comment"};
+			} else {
+				return std::nullopt;
+			}
 		}
 	}
 
@@ -254,7 +261,7 @@ bool skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 		skip_spaces(it, end);
 
 		if (it == end) {
-			return false;
+			return std::nullopt;
 		}
 
 		if (is_attribute_name_char(*it)) {
@@ -267,7 +274,7 @@ bool skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 			if (it != end && *it == '=') {
 				++it;
 				if (!skip_attribute_value()) {
-					return false;
+					return std::nullopt;
 				}
 			}
 		} else if (*it == '/') {
@@ -275,9 +282,9 @@ bool skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 			++it;
 			if (it != end && *it == '>') {
 				++it;
-				return true;
+				return tag_t{.opening = true, .closing = true, .name = tag_name};
 			} else {
-				return false;
+				return std::nullopt;
 			}
 		} else if (*it == '>') {
 			// opening tag
@@ -288,8 +295,9 @@ bool skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 						++it;
 						if (it != end && *it == '/') {
 							// std::cout << "[ending tag?]";
-							if (skip_ending_tag(it, end, tag_name)) {
-								return true;
+							const auto closing_tag = skip_ending_tag(it, end);
+							if (closing_tag && closing_tag->name == tag_name) {
+								return tag_t{.opening = true, .closing = true, .name = tag_name};
 							}
 						}
 					} else {
@@ -297,18 +305,16 @@ bool skip_tag_or_comment_inner(std::string_view::iterator & it, const std::strin
 					}
 				}
 			}
-			return true;
+			return tag_t{.opening = true, .closing = false, .name = tag_name};
 		} else {
-			return false;
+			return std::nullopt;
 		}
 	}
-	(void)begin_tag_name;
-	(void)end_tag_name;
 }
 
-bool skip_tag_or_comment(std::string_view::iterator & it, const std::string_view::iterator end) noexcept {
+auto skip_tag_or_comment(std::string_view::iterator & it, const std::string_view::iterator end) noexcept -> std::optional<tag_t> {
 	auto mine = it;
-	const bool result = skip_tag_or_comment_inner(mine, end);
+	auto result = skip_tag_or_comment_inner(mine, end);
 
 	if (result) {
 		it = mine;
@@ -409,6 +415,31 @@ auto read_entity(std::string_view::iterator & it, const std::string_view::iterat
 	return result;
 }
 
+std::optional<char> replacement_for_tag(const tag_t & tag) {
+	if (tag.name == "li" && tag.opening) {
+		return '*';
+	} else if (tag.name == "br") {
+		return '\n';
+	} else if (tag.name == "h1" || tag.name == "h2" || tag.name == "h3" || tag.name == "h4" || tag.name == "h5") {
+		if (tag.opening) {
+			return '#';
+		} else {
+			return '\n';
+		}
+
+	} else if (tag.name == "div") {
+		return '\n';
+	} else if (tag.name == "p") {
+		return '\n';
+	} else if (tag.name == "pre") {
+		return '\n';
+	} else if (tag.name == "code") {
+		return '`';
+	} else {
+		return std::nullopt;
+	}
+}
+
 std::string_view crawler::strip_tags(std::string_view input, std::span<char> output) noexcept {
 	// remove <script...>...</script>
 	// remove <style...>...</style>
@@ -425,6 +456,9 @@ std::string_view crawler::strip_tags(std::string_view input, std::span<char> out
 	assert(input.size() <= output.size());
 
 	auto write_character = [&, previous_space = false](char32_t c) mutable {
+		if (input.data() == output.data()) {
+			assert((std::less<void>()(&*out, &*it)));
+		}
 		assert(out != oend);
 
 		// TODO process unicode properly
@@ -451,10 +485,13 @@ std::string_view crawler::strip_tags(std::string_view input, std::span<char> out
 
 	while (it != end) {
 		const char c = *it;
-		if (c == '<' && skip_tag_or_comment(it, end)) {
-			assert(out != oend);
-			// write_character(' ');
-			continue;
+		if (c == '<') {
+			if (auto tag = skip_tag_or_comment(it, end)) {
+				if (auto replacement = replacement_for_tag(*tag)) {
+					write_character(static_cast<char32_t>(*replacement));
+				}
+				continue;
+			}
 		} else if (c == '&') {
 			if (auto entity = read_entity(it, end)) {
 				write_character(*entity);

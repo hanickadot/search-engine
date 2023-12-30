@@ -24,6 +24,6 @@ int main(int argc, char ** argv) {
 
 	std::cout << striped_content << "\n";
 
-	for (auto [a, b, c]: std::views::adjacent_view<3>(striped_content)) {
-	}
+	// for (auto [a, b, c]: std::views::adjacent_view<3>(striped_content)) {
+	// }
 }
