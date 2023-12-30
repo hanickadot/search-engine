@@ -4,17 +4,12 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <cassert>
 
 namespace crawler {
 
-std::string_view strip_tags(std::string_view input, std::span<char> output) noexcept;
-
-inline std::string strip_tags(std::string && mutable_input_output) noexcept {
-	const auto result = strip_tags(mutable_input_output, mutable_input_output);
-	// changed output was written into the string, so I can just resize it based on the size
-	mutable_input_output.resize(result.size());
-	return std::move(mutable_input_output);
-}
+std::string_view convert_to_plain_text(std::string_view input, std::span<char> output) noexcept;
+std::string convert_to_plain_text(std::string && mutable_input_output) noexcept;
 
 } // namespace crawler
 

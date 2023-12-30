@@ -20,7 +20,7 @@ int main(int argc, char ** argv) {
 		}
 	}
 
-	std::string striped_content = crawler::strip_tags(std::move(content));
+	std::string striped_content = crawler::convert_to_plain_text(std::move(content));
 
 	std::cout << striped_content << "\n";
 

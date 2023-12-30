@@ -440,7 +440,7 @@ std::optional<char> replacement_for_tag(const tag_t & tag) {
 	}
 }
 
-std::string_view crawler::strip_tags(std::string_view input, std::span<char> output) noexcept {
+std::string_view crawler::convert_to_plain_text(std::string_view input, std::span<char> output) noexcept {
 	// remove <script...>...</script>
 	// remove <style...>...</style>
 	// other tags only remove <X>[content]</X> and keep content
@@ -455,7 +455,7 @@ std::string_view crawler::strip_tags(std::string_view input, std::span<char> out
 
 	assert(input.size() <= output.size());
 
-	auto write_character = [&, previous_space = false](char32_t c) mutable {
+	auto write_character = [&, previous_space = true](char32_t c) mutable {
 		if (input.data() == output.data()) {
 			assert((std::less<void>()(&*out, &*it)));
 		}
@@ -505,4 +505,12 @@ std::string_view crawler::strip_tags(std::string_view input, std::span<char> out
 	}
 
 	return std::string_view(output.data(), (size_t)std::distance(output.begin(), out));
+}
+
+std::string crawler::convert_to_plain_text(std::string && mutable_input_output) noexcept {
+	const auto result = convert_to_plain_text(mutable_input_output, mutable_input_output);
+	// changed output was written into the string, so I can just resize it based on the size
+	assert(result.size() <= mutable_input_output.size());
+	mutable_input_output.resize(result.size());
+	return std::move(mutable_input_output);
 }
