@@ -477,6 +477,10 @@ template <typename Insert, typename Attribute> void convert_to_plain_text_ex(std
 			previous_space = false;
 		}
 
+		if (c >= 'A' && c <= 'Z') {
+			c = (c - 'A') + 'a';
+		}
+
 		// TODO write unicode
 		insert(static_cast<char>(c));
 	};
@@ -503,7 +507,7 @@ template <typename Insert, typename Attribute> void convert_to_plain_text_ex(std
 	}
 }
 
-std::string_view crawler::convert_to_plain_text(std::string_view input, std::span<char> output) noexcept {
+std::string_view crawler::convert_to_plain_text(std::string_view input, std::span<char> output) {
 	auto out = output.begin();
 
 	const auto insert_character = [&out, end = output.end()](char c) {
@@ -513,6 +517,27 @@ std::string_view crawler::convert_to_plain_text(std::string_view input, std::spa
 
 	const auto attribute_callback = [](std::string_view, std::string_view, std::string_view) {
 		// std::cout << "['" << key << "' -> '" << value << "']\n";
+	};
+
+	assert(input.size() <= output.size());
+
+	convert_to_plain_text_ex(input, insert_character, attribute_callback);
+
+	return std::string_view(output.data(), (size_t)std::distance(output.begin(), out));
+}
+
+std::string_view crawler::convert_to_plain_text(std::string_view input, std::span<char> output, std::function<void(size_t, std::string_view)> target) {
+	auto out = output.begin();
+
+	const auto insert_character = [&out, end = output.end()](char c) {
+		assert(out < end);
+		*out++ = c;
+	};
+
+	const auto attribute_callback = [&out, beg = output.begin(), &target](std::string_view tag, std::string_view key, std::string_view value) {
+		if ((tag == "div" || tag == "span" || tag == "li") && key == "id") {
+			target(static_cast<size_t>(std::distance(beg, out)), value);
+		}
 	};
 
 	assert(input.size() <= output.size());
@@ -533,10 +558,7 @@ std::vector<crawler::id_and_text> crawler::convert_to_plain_text_by_nearest_anch
 	};
 
 	const auto attribute_callback = [&output](std::string_view tag, std::string_view key, std::string_view value) {
-		if ((tag == "div" || tag == "li") && key == "id") {
-			if (output.back().text.empty()) {
-				output.pop_back();
-			}
+		if ((tag == "div" || tag == "span" || tag == "li") && key == "id") {
 			output.emplace_back(id_and_text{.id = std::string(value)});
 		}
 	};
@@ -546,8 +568,16 @@ std::vector<crawler::id_and_text> crawler::convert_to_plain_text_by_nearest_anch
 	return output;
 }
 
-std::string crawler::convert_to_plain_text(std::string && mutable_input_output) noexcept {
+std::string crawler::convert_to_plain_text(std::string && mutable_input_output) {
 	const auto result = convert_to_plain_text(mutable_input_output, mutable_input_output);
+	// changed output was written into the string, so I can just resize it based on the size
+	assert(result.size() <= mutable_input_output.size());
+	mutable_input_output.resize(result.size());
+	return std::move(mutable_input_output);
+}
+
+std::string crawler::convert_to_plain_text(std::string && mutable_input_output, std::function<void(size_t, std::string_view)> target) {
+	const auto result = convert_to_plain_text(mutable_input_output, mutable_input_output, target);
 	// changed output was written into the string, so I can just resize it based on the size
 	assert(result.size() <= mutable_input_output.size());
 	mutable_input_output.resize(result.size());

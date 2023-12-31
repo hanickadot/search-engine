@@ -54,9 +54,9 @@ add_subdirectory(external/co_curl)
 add_subdirectory(include)
 
 
-add_executable(crawler-example crawler.cpp)
-target_link_libraries(crawler-example co_curl ctre crawler)
-target_compile_features(crawler-example PUBLIC cxx_std_23)
+add_executable(build-index build-index.cpp)
+target_link_libraries(build-index co_curl ctre crawler)
+target_compile_features(build-index PUBLIC cxx_std_23)
 
 add_executable(strip strip.cpp)
 target_link_libraries(strip crawler)

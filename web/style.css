@@ -1,0 +1,225 @@
+body {
+	font-family: Helvetica;
+	font-size: 14px;
+	padding: 0;
+	margin: 0;
+}
+input[type=search], #searchbox {
+	width: 100%;
+	height: 50px;
+	font-family: Monaco, Mono, "Courier New";
+	font-size: 25px !important;
+	border: none;
+	border-bottom: 0.2em solid rgba(200,200,200,0.2);
+	outline: none;
+	padding: 5px 0.5em;
+	margin: 0;
+	box-shadow: 0 0 100px rgba(0,0,0,0.2);
+	position: fixed;
+	top: 0;
+	z-index: 100;
+	background: rgba(255,255,255,0.5);
+    -webkit-backdrop-filter: blur(15px);
+    backdrop-filter: blur(15px);
+}
+
+body {
+	overflow-x: clip;
+}
+
+input[type=search]:focus, #searchbox:focus {
+	border-bottom: 0.2em solid rgba(237,235,255,0.8);
+}
+ol#search_result {
+	padding-top: 40px;
+}
+ol#search_result > li {
+	counter-increment: list;
+	list-style-type: none;
+	position: relative;
+	line-height: 28px;
+	font-size: 20px;
+}
+
+ol#search_result li:before {
+  color: #1d4192;
+  content: counter(list) ".";
+  left: -32px;
+  position: absolute;
+  text-align: right;
+  width: 26px;
+}
+.search_result_div {
+	margin-top: 15px;
+}
+#search_result > li {
+	display: block;
+	white-space: nowrap;
+}
+#search_result > li > a.normal {
+	color: black;
+	text-decoration: none;
+}
+#search_result > li > a.normal:visited {
+	color: #051c4f;
+	text-decoration: underline dotted;
+}
+#search_result > li > a.normal:hover {
+	color: #0000EE;
+	text-decoration: underline;
+}
+#search_result > li > span.ratio {
+	margin-left: 0.5em;
+	padding: 2px 4px;
+	background-color: lightgray;
+	color: black;
+	border-radius: 3em;
+	font-size: 10px;
+	font-weight: bold;
+	line-height: 12px;
+	min-width: 1.5em;
+	text-align: center;
+	display: inline-block;
+	position: relative;
+	bottom: 3px;
+}
+
+#search_result > li > a.target {
+	font-size: 14px;
+	color: #cecece;
+	text-decoration: none;
+	padding-left: 0.5em;
+	font-family: Monaco, Mono, "Courier New";
+}
+#search_result > li > a.target > span {
+	color: #989898;
+}
+#search_result > li > a.target:visited, #search_result > li > a.target:visited > span {
+	color: #3f4883;
+	text-decoration: underline dotted;
+}
+#search_result > li > a.target:hover, #search_result > li > a.target:hover > span {
+	color: #0000EE;
+	text-decoration: underline;
+}
+#search_result > li > span.info {
+	font-size: 10px;
+}
+#search_result span.info {
+	padding-top: 10px;
+	color: grey;
+	display: block;
+}
+#more_info {
+	font-size: 12px;
+	color: gray;
+	text-align: center;
+}
+
+
+.wrapper {
+	position: relative;
+	top: -8vh;
+}
+
+
+.ngrams {
+	font-family: Monaco, Mono, "Courier New";
+	font-size: 15px;
+	position: relative;
+	margin: 0 auto;
+	margin-top: 1em;
+	padding-top: 1em;
+	width: 10em;
+	text-align: center;
+	vertical-align: middle;
+}
+
+.ngrams > span {
+	font-size: 35px;
+	border: 0.1em solid rgba(0,0,0,0.1);
+	color: rgba(0,0,0,0.9);
+	border-radius: 2em;
+	padding: 0.1em 0.3em;
+	padding-right: 0.1em;
+	white-space: pre;
+	position: absolute;
+	letter-spacing: 0.2em;
+	/*box-shadow: 5px 5px 10px rgba(0,0,0,0.2);*/
+	text-shadow: 0px 0px 10px rgba(255,255,255,0.9)
+}
+
+.ngrams > span.selected {
+	border: 0.1em solid rgba(0,0,0,0.9);
+	color: black;
+}
+
+.ngrams > span > b {
+	background-color: black;
+	color: white;
+	border-radius: 20px;
+	padding: 2px 5px;
+	margin-left: 5px;
+	font-family: Helvetica;
+	font-size: 20px;
+	display: inline-block;
+	text-align: center;
+	letter-spacing: normal;
+	padding-left: 0.3em;
+	padding-right: 0.3em;
+	margin-right: 0.3em;
+	text-shadow: none;
+	position: relative;
+	top: -0.25em;
+	min-width: 1em;
+}
+
+.ngrams > span > i {
+	background-color: rgba(255,0,0,0.9);
+	color: white;
+	border-radius: 20px;
+	padding: 2px 5px;
+	margin-left: 5px;
+	font-family: Helvetica;
+	display: inline-block;
+	text-align: center;
+	padding-left: 0.3em;
+	padding-right: 0.3em;
+	margin-right: 0.3em;
+	text-shadow: none;
+	font-size: 20px;
+	position: absolute;
+	letter-spacing: normal;
+	top: -0.75em;
+	right: -1em;
+	min-width: 1em;
+	z-index: 10;
+	box-shadow: 2px 2px 10px rgba(0,0,0,0.2);
+}
+
+.control {
+	font-family: Monaco;
+	text-align: center;
+	font-size: 25px;
+	
+	padding-bottom: 1em;
+}
+
+.control > span.input {
+	margin: 0 auto;
+	border-bottom: 0.1em solid rgba(0,0,0,0.05);
+	font-family: Monaco;
+	font-size: 1em;
+	padding: 0.1em;
+	text-align: center;
+	transition: border 1s;
+}
+
+.control > span.input:focus {
+	border-bottom: 0.1em solid rgba(0,0,0,0.3);
+	
+}
+
+[contenteditable] {
+	outline: 0px solid transparent;
+}

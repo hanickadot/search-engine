@@ -1,12 +1,40 @@
 #ifndef CRAWLER_INDEX_HPP
 #define CRAWLER_INDEX_HPP
 
+#include <algorithm>
 #include <array>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <map>
+#include <set>
 
 namespace crawler {
 
-template <size_t N> struct ngram_t: std::array<char8_t, N> { };
+static constexpr char to_hexdec(unsigned v) {
+	assert(v < 16u);
+	return "0123456789abcdef"[v];
+}
+
+template <size_t N> struct ngram_t: std::array<char8_t, N> {
+	friend std::filesystem::path operator/(const std::filesystem::path & lhs, ngram_t rhs) {
+		std::array<char, N * 2 + 5> tmp;
+		auto it = tmp.begin();
+		for (unsigned byte: rhs) {
+			*it++ = to_hexdec(byte >> 4);
+			*it++ = to_hexdec(byte & 0xFu);
+		}
+		*it++ = '.';
+		*it++ = 'j';
+		*it++ = 's';
+		*it++ = 'o';
+		*it++ = 'n';
+
+		assert(it == tmp.end());
+
+		return lhs / std::string_view(tmp.data(), tmp.size());
+	}
+};
 
 struct position_t {
 	uint32_t n;
@@ -23,11 +51,16 @@ template <size_t N> struct ngram_builder_t {
 	ngram_type data{0};
 	position_t pos{0};
 
-	constexpr void push(char8_t c) noexcept {
+	constexpr explicit operator bool() const noexcept {
+		return pos.n >= N;
+	}
+
+	constexpr bool push(char8_t c) noexcept {
 		// rotate one left
 		std::rotate(data.begin(), data.begin() + 1, data.end());
 		data.back() = c;
 		pos.n++;
+		return static_cast<bool>(*this);
 	}
 
 	constexpr ngram_type ngram() const noexcept {
@@ -35,11 +68,7 @@ template <size_t N> struct ngram_builder_t {
 	}
 
 	constexpr position_t position() const noexcept {
-		return pos - N;
-	}
-
-	constexpr explicit operator bool() const noexcept {
-		return pos >= N;
+		return position_t{pos.n - N};
 	}
 };
 
@@ -48,57 +77,143 @@ struct link_target {
 };
 
 struct document_info {
-	inline document_info(std::string url_) noexcept: url{std::move(url_)} { }
-
 	std::string url;
-	std::map<position_t, target> position_to_target;
-	unsigned id{0};
+	size_t ngrams{0};
+	std::map<position_t, link_target> position_to_target{};
 
-	inline void add_target(position pos, std::string target) noexcept {
+	explicit document_info(std::string url_): url{std::move(url_)} { }
+
+	inline void add_target(position_t pos, std::string target) {
 		// we want always the latest one...
-		position_to_target.insert_or_assign(line, std::move(target));
+		position_to_target.insert_or_assign(pos, link_target{std::move(target)});
 	}
 };
 
 struct occurence_t {
-	uint32_t position;
-	const document_info & document;
+	uint32_t id;
+	position_t position;
+
+	constexpr friend bool operator==(occurence_t, occurence_t) noexcept = default;
+	constexpr friend auto operator<=>(occurence_t, occurence_t) noexcept = default;
 };
 
 struct leaf_t {
-	std::set<occurence_t> set;
+	std::set<occurence_t> data;
+	std::vector<occurence_t> unsorted_data;
+
+	template <size_t N> void save_to(ngram_t<N> ngram, const std::filesystem::path & prefix) {
+		std::sort(unsorted_data.begin(), unsorted_data.end());
+
+		const auto name = prefix / ngram;
+
+		auto of = std::ofstream{name, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc};
+
+		if (!of) {
+			std::cerr << "can't open: " << name << "\n";
+			return;
+		}
+		of << "[";
+
+		bool first = true;
+		for (const occurence_t & occ: unsorted_data) {
+			if (first) first = false;
+			else
+				of << ",";
+			of << "[" << occ.id << "," << occ.position.n << "]";
+		}
+
+		of << "]";
+	}
 };
 
 template <size_t N> struct index_t {
 	using ngram_type = ngram_t<N>;
+	using documents_type = std::vector<document_info>;
 
-	std::map<position_t, document_info> documents;
-	std::map<ngram_type, leaf_t> leafs;
+	documents_type documents{};
+	std::map<ngram_type, leaf_t> leaves{};
 
 	index_t() = default;
 	index_t(index_t &&) = default;
 	index_t(const index_t &) = delete;
 	~index_t() noexcept = default;
 
-	document_info * insert_document(std::string url) {
-		auto && [it, success] = documents.emplace(std::move(url));
-		if (!success) {
-			return nullptr;
-		}
-		return std::addressof(it->second);
+	document_info & insert_document(std::string url) {
+		return documents.emplace_back(std::move(url));
 	}
 
-	void insert_ngram(ngram_type ngram, position_t position, const document_info & doc) {
-		auto && [it, success] leafs.try_emplace(ngram);
-		it->second.set.emplace(position, doc);
+	void insert_ngram(ngram_type ngram, position_t position, document_info & doc) {
+		auto && [it, success] = leaves.try_emplace(ngram);
+		it->second.unsorted_data.emplace_back((uint32_t)std::distance(documents.data(), std::addressof(doc)), position);
+		++doc.ngrams;
 	}
 
-	void insert_ngram(ngram_builder_t & builder, const document_info & doc) {
+	void insert_ngram(ngram_builder_t<N> & builder, document_info & doc) {
 		if (!builder) {
 			return;
 		}
 
 		insert_ngram(builder.ngram(), builder.position(), doc);
+	}
+
+	void save_documents_list(const std::filesystem::path & name) const {
+		auto of = std::ofstream{name, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc};
+		of << "[";
+		bool first = true;
+		for (const auto & doc: documents) {
+			if (first) first = false;
+			else
+				of << ",";
+			of << "[" << std::quoted(doc.url) << "," << doc.ngrams << "]";
+		}
+		of << "]";
+	}
+
+	void save_documents_targets(const std::filesystem::path & prefix) const {
+		const auto beg = documents.begin();
+		const auto end = documents.end();
+		for (auto it = documents.begin(); it != end; ++it) {
+			const auto & doc = *it;
+			std::filesystem::path name = prefix / std::format("{:0>5}.json", std::distance(beg, it));
+			auto of = std::ofstream{name, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc};
+
+			if (!of) {
+				std::cerr << "can't open file: " << name << "\n";
+				return;
+			}
+
+			of << "[";
+
+			bool first2 = true;
+			for (const auto & [position, target]: doc.position_to_target) {
+				if (first2) first2 = false;
+				else
+					of << ",";
+				of << "[";
+				of << position.n << "," << std::quoted(target.target);
+				of << "]";
+			}
+			of << "]";
+		}
+	}
+
+	void save_into(const std::filesystem::path & prefix) {
+		auto ec = std::error_code{};
+		std::filesystem::create_directories(prefix, ec);
+
+		save_documents_list(prefix / "urls.json");
+
+		const auto target_dir = prefix / "targets";
+		std::filesystem::create_directories(target_dir, ec);
+
+		save_documents_targets(target_dir);
+
+		const auto leaf_dir = prefix / "leaves";
+		std::filesystem::create_directories(leaf_dir, ec);
+
+		for (auto & [ngram, leaf]: leaves) {
+			leaf.save_to(ngram, leaf_dir);
+		}
 	}
 };
 

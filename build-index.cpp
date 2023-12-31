@@ -2,9 +2,11 @@
 #include <co_curl/co_curl.hpp>
 #include <co_curl/format.hpp>
 #include <co_curl/url.hpp>
+#include <crawler/index.hpp>
 #include <crawler/strip-tags.hpp>
 #include <ctre.hpp>
 #include <iostream>
+#include <numeric>
 #include <ranges>
 #include <set>
 #include <string>
@@ -107,8 +109,6 @@ bool known_extension(std::string_view path) noexcept {
 		return true;
 	} else if (path.ends_with(".css")) {
 		return true;
-	} else if (path.ends_with(".md")) {
-		return true;
 	} else if (path.ends_with(".txt")) {
 		return true;
 	} else if (path.ends_with(".svg")) {
@@ -123,7 +123,25 @@ bool known_extension(std::string_view path) noexcept {
 	return false;
 }
 
-auto fetch_recursive(std::string requested_url, auto & check_link, auto & add_link, std::string referer, int attempts = 10) -> co_curl::promise<std::optional<url_content>> {
+bool blocked_extensions(std::string_view url) noexcept {
+	if (url.ends_with(".gif") || url.ends_with(".png") || url.ends_with(".jpg") || url.ends_with(".jpeg") || url.ends_with(".svg") || url.ends_with(".ico")) {
+		return true;
+	} else if (url.ends_with(".pdf") || url.ends_with(".bin") || url.ends_with(".dat") || url.ends_with(".doc") || url.ends_with(".zip")) {
+		// we can't index pdf yet
+		return true;
+	} else if (url.ends_with(".js") || url.ends_with(".css")) {
+		return true;
+	}
+
+	return false;
+}
+
+template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::string requested_url, auto & check_link, auto & add_link, std::string referer, int attempts = 10) -> co_curl::promise<void> {
+	if (blocked_extensions(requested_url)) {
+		std::cerr << "skipped: " << requested_url << "\n";
+		co_return;
+	}
+
 	auto handle = co_curl::easy_handle{requested_url};
 
 	std::string output;
@@ -131,8 +149,8 @@ auto fetch_recursive(std::string requested_url, auto & check_link, auto & add_li
 	// handle.verbose();
 	handle.follow_location();
 	handle.write_into(output);
-	handle.connection_timeout(std::chrono::seconds{2});
-	handle.low_speed_timeout(100, std::chrono::seconds{1});
+	handle.connection_timeout(std::chrono::seconds{3});
+	handle.low_speed_timeout(64, std::chrono::seconds{1});
 
 	for (;;) {
 		auto r = co_await handle.perform();
@@ -141,16 +159,17 @@ auto fetch_recursive(std::string requested_url, auto & check_link, auto & add_li
 			output.clear();
 
 			if (attempts-- > 0) {
+				// TODO co_await before trying again
 				continue;
 			}
 
 			std::cerr << "failed to download: " << requested_url << " (error = " << r << ")\n";
-			co_return std::nullopt;
+			co_return;
 		}
 
 		if (handle.get_response_code() != co_curl::http_2XX) {
 			std::cerr << "HTTP " << handle.get_response_code() << ": " << requested_url << " (referer = " << referer << ")\n";
-			co_return std::nullopt;
+			co_return;
 		}
 
 		break;
@@ -162,18 +181,16 @@ auto fetch_recursive(std::string requested_url, auto & check_link, auto & add_li
 
 	if (!info) {
 		std::cerr << "can't get URL info for: " << final_url << "\n";
-		co_return std::nullopt;
+		co_return;
 	}
 
 	if (!check_link(*info)) {
 		std::cerr << "post download disallowed file: " << final_url << "\n";
-		co_return std::nullopt;
+		co_return;
 	}
 
 	if (requested_url != final_url) {
 		std::cout << "redirected: " << requested_url << " -> " << final_url << "\n";
-	} else {
-		std::cout << "downloaded: " << final_url << "\n";
 	}
 
 	for (auto && url: extract_hrefs(output, final_url)) {
@@ -186,7 +203,48 @@ auto fetch_recursive(std::string requested_url, auto & check_link, auto & add_li
 		info->path.append(extension_by_mime(mime));
 	}
 
-	co_return url_content{.info = std::move(*info), .content = crawler::convert_to_plain_text(std::move(output))};
+	bool convert = false;
+
+	if (!mime.has_value()) {
+		convert = true;
+
+	} else if (mime->starts_with("text/html")) {
+		convert = true;
+
+	} else if (mime->starts_with("text/plain")) {
+		// do nothing
+	} else {
+		std::cerr << "ignored: " << final_url << " (mime = " << *mime << ")\n";
+		co_return;
+	}
+
+	auto & doc = index.insert_document(info->url);
+	auto builder = crawler::ngram_builder_t<N>{};
+
+	const auto start = std::chrono::high_resolution_clock::now();
+
+	if (convert) {
+		// crawle thru everything
+		const auto add_section = [&](size_t pos, std::string_view target) {
+			doc.add_target(crawler::position_t{static_cast<uint32_t>(pos)}, std::string{target});
+		};
+
+		output = crawler::convert_to_plain_text(std::move(output), add_section);
+	}
+
+	for (char c: output) {
+		if (builder.push(static_cast<char8_t>(c))) {
+			index.insert_ngram(builder, doc);
+		}
+	}
+
+	const auto end = std::chrono::high_resolution_clock::now();
+
+	const auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+	std::cout << info->url << " (" << dur.count() << "ms)\n";
+
+	co_return;
 }
 
 struct url_and_referer {
@@ -201,10 +259,11 @@ struct url_and_referer {
 	}
 };
 
-auto download_everything(std::string first_url, auto & allow) -> co_curl::promise<std::set<url_content>> {
+template <size_t N = 3> auto download_everything(std::set<std::string> urls, auto & allow) -> co_curl::promise<crawler::index_t<N>> {
 	std::set<url_and_referer> urls_to_download{};
 	std::set<url_and_referer> touched_urls{};
-	std::set<url_content> results{};
+
+	crawler::index_t<N> index{};
 
 	auto add_link = [&](std::string url, std::string referer) {
 		urls_to_download.emplace(std::move(url), std::move(referer));
@@ -220,9 +279,11 @@ auto download_everything(std::string first_url, auto & allow) -> co_curl::promis
 		add_link(std::move(info.url), previous.url);
 	};
 
-	add_link(first_url, ""); // start here!
+	for (const auto & first_url: urls) {
+		add_link(first_url, ""); // start here!
+	}
 
-	auto queue = std::queue<co_curl::promise<std::optional<url_content>>>{};
+	auto queue = std::queue<co_curl::promise<void>>{};
 
 	for (;;) {
 		// if we have something to download...
@@ -234,17 +295,12 @@ auto download_everything(std::string first_url, auto & allow) -> co_curl::promis
 			auto [position, inserted, node] = touched_urls.insert(std::move(first));
 			// if it's a unique element there, actually download it
 			if (inserted) {
-				queue.push(fetch_recursive(position->url, allow, add_link_from_info, position->referer));
+				queue.push(fetch_recursive(index, position->url, allow, add_link_from_info, position->referer));
 			}
 		}
 
 		if (!queue.empty()) {
-			auto result = co_await std::move(queue.front());
-
-			if (result.has_value()) {
-				results.emplace(std::move(*result));
-			}
-
+			co_await std::move(queue.front());
 			queue.pop();
 		}
 
@@ -253,16 +309,8 @@ auto download_everything(std::string first_url, auto & allow) -> co_curl::promis
 		}
 	}
 
-	co_return std::move(results);
+	co_return std::move(index);
 };
-
-constexpr auto allow_everything = [](const auto &) {
-	return true;
-};
-
-auto download_everything(std::string first_url) -> co_curl::promise<std::set<url_content>> {
-	return download_everything(std::move(first_url), allow_everything);
-}
 
 [[maybe_unused]] constexpr auto cppreference = [](const auto & path) -> bool {
 	if (path.starts_with("/wiki_old/")) {
@@ -317,11 +365,15 @@ auto download_everything(std::string first_url) -> co_curl::promise<std::set<url
 	}
 };
 
-int main(int argc, char ** argv) {
-	if (argc < 2) {
-		return 1;
+std::set<std::string> args_to_set_of_string(int argc, char ** argv) {
+	std::set<std::string> urls;
+	for (int i = 1; i != argc; ++i) {
+		urls.emplace(std::string{argv[i]});
 	}
+	return urls;
+}
 
+int main(int argc, char ** argv) {
 	signal(
 		SIGINT, +[](int) {
 		std::cerr << "requesting stop...\n";
@@ -329,15 +381,24 @@ int main(int argc, char ** argv) {
 		signal(SIGINT, SIG_DFL);
 	});
 
-	const std::string url = argv[1];
-	auto files = download_everything(url, based_on_server).get();
+	co_curl::get_scheduler().waiting.curl.max_total_connections(6);
 
-	std::cout << "files count = " << files.size() << "\n";
+	auto index = download_everything<3>(args_to_set_of_string(argc, argv), based_on_server).get();
 
-	size_t total_size = 0;
-	for (const auto & item: files) {
-		total_size += item.content.size();
-	}
+	std::cout << "indexed documents = " << index.documents.size() << "\n";
+	std::cout << "unique ngrams = " << index.leaves.size() << "\n";
+	const size_t total_count = std::accumulate(index.leaves.begin(), index.leaves.end(), size_t{0}, [](size_t lhs, const auto & rhs) {
+		return lhs + rhs.second.unsorted_data.size();
+	});
 
-	std::cout << "downloaded: " << co_curl::data_amount{total_size} << "\n";
+	const size_t total_targets = std::accumulate(index.documents.begin(), index.documents.end(), size_t{0}, [](size_t lhs, const auto & rhs) {
+		return lhs + rhs.position_to_target.size();
+	});
+	std::cout << "targets = " << total_targets << "\n";
+	std::cout << "total ngrams = " << total_count << "\n";
+	std::cout << "saving...\n";
+
+	index.save_into("web/index/");
+
+	std::cout << "done.\n";
 }
