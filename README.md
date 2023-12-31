@@ -5,6 +5,8 @@ Code is really messy and it will probably explode, so don't use it :)
 ## Building
 
 ```bash
+git clone --recursive https://github.com/hanickadot/search-engine.git search-engine
+cd search-engine
 cmake -B build .
 cmake --build build
 ./build/build-index https://urlA https://urlB
