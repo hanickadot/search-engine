@@ -4,7 +4,7 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-		<title>hana's search engine</title>
+		<title>search C++ standard draft</title>
 		
 		<link rel="stylesheet" href="style.css">
 		<script src="d3.v7.js"></script>
@@ -119,12 +119,18 @@
 
 			
 			
-			const urls = fetch("index/urls.json").then((response) => response.json());
+			const urls = fetch("index/urls.json", {cache: "force-cache"}).then((response) => response.json());
+			const outliers = fetch("index/outliers.json", {cache: "force-cache"}).then((response) => { 
+				if (response.status == 404) {
+					return [];
+				}
+				return response.json();
+			});
 			
 			// this will download and map ngram with offset
 			async function download_index_for(ngram) {
 				const url = "index/leaves/"+ngram+".json";
-				const response = await fetch(url)
+				const response = await fetch(url, {cache: "force-cache"});
 				
 				if (response.status == 404) {
 					return [];
@@ -144,7 +150,7 @@
 			
 			async function download_targets_for(document_id) {
 				const url = "index/targets/"+format_document_target_id_file(document_id)+".json";
-				const response = await fetch(url)
+				const response = await fetch(url, {cache: "force-cache"})
 				
 				if (response.status == 404) {
 					return [];
@@ -262,27 +268,94 @@
 				return Object.entries(result).map((v) => v[1]);
 			}
 			
+			async function optimize_and_download(ngrams, outliers_promise, size) {
+				const outliers = await outliers_promise;
+				
+				const info = ngrams.map((ngram, off) => ({ngram: ngram, cost: outliers[ngram], first: off, enabled: true}));
+				let unique = new Set(ngrams);
+				let coverage = new Array(ngrams.length + size - 1).fill(0);
+				
+				const offset = [...new Array(size).keys()];
+				
+				// fill coverage
+				ngrams.forEach((ngram, off) => { offset.forEach((n) => coverage[off + n]++) });
+				
+				const remove_ngram = (ngram) => {
+					info.filter((item) => item.ngram == ngram).forEach((item) => {
+						offset.forEach((off) => { coverage[off + item.first]--; });
+					});
+				};
+				
+				// remove some if possible
+				const opportunity = (ngram) => {
+					//let unique_covered_boxes = 0;
+					const ngram_and_opportunity = {ngram: ngram, opportunity: info.filter((item) => item.ngram == ngram).reduce((previous_cost, item) => {
+						const unique_hit = offset.reduce((acc, off) => acc + (coverage[item.first + off] == 1), 0);
+						if (unique_hit > 0) {
+							return 0; // we can't remove this element
+						} else {
+							return previous_cost * (item.cost ? (2 ** item.cost) : 1);
+						}
+					}, 1)};
+					
+					//console.log(`opportunity: ${ngram_and_opportunity.ngram} -> ${ngram_and_opportunity.opportunity}`);
+					return ngram_and_opportunity;
+				};
+				
+				// loop thru until nothing can be removed
+				for (;;) {
+					const candidate = [...unique].reduce((previous, ngram) => {
+						const item = opportunity(ngram);
+						if (item.opportunity == 0) {
+							return previous;
+						}
+						if (previous == undefined) {
+							return item;
+						}
+						if (previous.opportunity > item.opportunity) {
+							return previous;
+						} else {
+							return item;
+						}
+					}, undefined);
+				
+					if (candidate === undefined) {
+						break;
+					}
+				
+					//console.log(`removal: ${candidate.ngram} (${candidate.opportunity})`);
+					unique.delete(candidate.ngram);
+					remove_ngram(candidate.ngram);
+				}
+				
+				//return ngrams;
+				const needed = await Promise.all([...unique].map((ngram) => ({ngram: ngram, promise: download_index_for(ngram)})));
+				
+				
+				// offset
+				const mapped_ngrams = ngrams.map((ngram, offset) => ({ngram_and_promise: needed.find((item) => item.ngram == ngram), offset: offset})).filter((item) => item.ngram_and_promise !== undefined);
+				
+				return await Promise.all(mapped_ngrams.map(async (item) => {
+					const entries = await item.ngram_and_promise.promise;
+					
+					// null means transparency for search (it can't be [] as we will be doing intersection)
+					if (entries === null) {
+						return entries;
+					}
+					
+					return entries.map((entry) => ({id: entry[0], position: entry[1] - item.offset}));
+				}));
+			}
+			
 			async function list_of_documents_for_each_word(words, size = 3) {
 				return Promise.all(words.map(async (word) => {
 					// this access internet and download all ngrams indices for current word
-					const ngrams_for_word = word.ngrams(size);
-				
-					const ngram_hits = await Promise.all(ngrams_for_word.map(async (ngram, offset) => {
-						// download
-						const entries = await download_index_for(ngram);
-						
-						if (entries === null) {
-							return entries;
-						}
-						
-						// and transform based on the offset of the ngram in current word
-						return entries.map((entry) => ({id: entry[0], position: entry[1] - offset}));
-					}));
-					
+					const ngrams_from_query = word.ngrams(size);
+					const ngram_hits = await optimize_and_download(ngrams_from_query, outliers, size);
 					const sorted_ngram_hits = sort_by_length(ngram_hits.filter(hit => hit !== null));
 					const hits = set_intersection(sorted_ngram_hits);
 					// we need to wait for all document list and then we produce list of unique documents for current word
-					return reduce_documents(hits, ngrams_for_word.length + size - 1);
+					return reduce_documents(hits, ngrams_from_query.length + size - 1);
 				}));
 			}
 			
@@ -527,7 +600,7 @@
 				
 			//update();
 		</script>
-		<input id="searchbox" placeholder="search LLVM docs" type="search" autofocus autocorrect="off" autocapitalize="none"  oninput="search(this.value, search_result)"/>
+		<input id="searchbox" placeholder="search C++ standard draft" type="search" autofocus autocorrect="off" autocapitalize="none" spellcheck="false" oninput="search(this.value, search_result)"/>
 		<ol id="search_result">
 		</ol>
 		<script>

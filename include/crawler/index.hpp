@@ -7,6 +7,7 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <ranges>
 #include <set>
 
 namespace crawler {
@@ -17,13 +18,22 @@ static constexpr char to_hexdec(unsigned v) {
 }
 
 template <size_t N> struct ngram_t: std::array<char8_t, N> {
-	friend std::filesystem::path operator/(const std::filesystem::path & lhs, ngram_t rhs) {
-		std::array<char, N * 2 + 5> tmp;
-		auto it = tmp.begin();
-		for (unsigned byte: rhs) {
+	auto write_hexdec_into(auto it) const noexcept {
+		for (unsigned byte: *this) {
 			*it++ = to_hexdec(byte >> 4);
 			*it++ = to_hexdec(byte & 0xFu);
 		}
+		return it;
+	}
+	std::string get_hexdec() const noexcept {
+		auto output = std::string{};
+		output.resize(N * 2);
+		write_hexdec_into(output.begin());
+		return output;
+	}
+	friend std::filesystem::path operator/(const std::filesystem::path & lhs, ngram_t rhs) {
+		std::array<char, N * 2 + 5> tmp;
+		auto it = rhs.write_hexdec_into(tmp.begin());
 		*it++ = '.';
 		*it++ = 'j';
 		*it++ = 's';
@@ -197,6 +207,40 @@ template <size_t N> struct index_t {
 		}
 	}
 
+	struct ngram_and_size_t {
+		size_t size;
+		ngram_type ngram;
+
+		friend constexpr auto operator<=>(const ngram_and_size_t & lhs, const ngram_and_size_t & rhs) noexcept {
+			// switch lhs and rhs intentionally
+			return std::tie(rhs.size, rhs.ngram) <=> std::tie(lhs.size, lhs.ngram);
+		}
+
+		friend constexpr bool operator==(const ngram_and_size_t & lhs, const ngram_and_size_t & rhs) noexcept = default;
+	};
+
+	void save_outliers(const std::filesystem::path & name) const {
+		auto of = std::ofstream{name, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc};
+
+		constexpr auto ngram_and_size = std::views::transform([](const auto & pair) {
+			return ngram_and_size_t{pair.second.unsorted_data.size(), pair.first};
+		});
+
+		auto sizes = leaves | ngram_and_size | std::ranges::to<std::vector>();
+		std::ranges::sort(sizes);
+
+		bool first = true;
+		of << "{";
+		for (auto [size, ngram]: sizes | std::ranges::views::take(sizes.size() / 20)) { // top 5%
+			if (first) first = false;
+			else
+				of << ",";
+
+			of << std::quoted(ngram.get_hexdec()) << ":" << size;
+		}
+		of << "}";
+	}
+
 	void save_into(const std::filesystem::path & prefix) {
 		auto ec = std::error_code{};
 		std::filesystem::create_directories(prefix, ec);
@@ -214,6 +258,8 @@ template <size_t N> struct index_t {
 		for (auto & [ngram, leaf]: leaves) {
 			leaf.save_to(ngram, leaf_dir);
 		}
+
+		save_outliers(prefix / "outliers.json");
 	}
 };
 
