@@ -45,19 +45,28 @@ static auto get_url_and_path(const std::string & original_url) -> std::optional<
 	return url_and_path{.url = std::move(*opt_url), .host = std::move(*opt_host), .path = std::move(*opt_path)};
 }
 
-auto extract_hrefs(std::string_view content, const std::string & original_url) {
-	constexpr auto remove_quotes = [](const ctre::capture_groups auto & groups) -> std::string_view {
-		return groups.template get<1>();
-	};
+auto normalize_and_filter_links(auto && range_of_links, const std::string & original_url) {
+	const auto normalize = [&](std::optional<std::string_view> in) -> std::optional<url_and_path> {
+		if (!in) {
+			return std::nullopt;
+		}
 
-	const auto normalize = [&original_url](std::string_view in) -> std::optional<url_and_path> {
-		auto url = co_curl::url{original_url.c_str(), std::string(in).c_str()}.remove_fragment().remove_query();
+		auto url = co_curl::url{original_url.c_str(), std::string(*in).c_str()}.remove_fragment().remove_query(); // in case of problems remove the forced scheme
+
 		auto opt_url = url.get();
 		auto opt_host = url.host();
 		auto opt_path = url.path();
 
 		if (!opt_url || !opt_host || !opt_path) {
 			return std::nullopt;
+		}
+
+		if (std::string_view(original_url).starts_with("https://")) {
+			if (std::string_view(*opt_url).starts_with("http://")) {
+				url.set_scheme("https");
+				opt_url = url.get();
+				opt_host = url.host();
+			}
 		}
 
 		return url_and_path{.url = std::move(*opt_url), .host = std::move(*opt_host), .path = std::move(*opt_path)};
@@ -71,7 +80,58 @@ auto extract_hrefs(std::string_view content, const std::string & original_url) {
 		return std::move(*in);
 	};
 
-	return ctre::split<R"/((?:href|src|data-src|data-original)=(?:["']([^"']*+)["']))/">(content) | std::views::transform(remove_quotes) | std::views::transform(std::move(normalize)) | std::views::filter(nonempty) | std::views::transform(unwrap);
+	return std::ranges::transform_view(std::move(range_of_links), std::move(normalize)) | std::views::filter(nonempty) | std::views::transform(unwrap);
+}
+
+auto extract_hrefs_from_html(std::string_view content, const std::string & original_url) {
+	constexpr auto search_all_links = ctre::search_all<R"/((?:(?:href|src|data-src|data-original)=(?:"(?<dg>[^"]*+)"|'(?<sg>[^']*+)'| (?<space>[^ ]*+))))/">;
+
+	constexpr auto remove_quotes = std::views::transform([](auto && in) -> std::string_view {
+		if (auto content = in.template get<"dg">()) {
+			return content;
+		}
+
+		if (auto content = in.template get<"sg">()) {
+			return content;
+		}
+
+		if (auto content = in.template get<"space">()) {
+			return content;
+		}
+
+		std::unreachable();
+	});
+
+	return normalize_and_filter_links(search_all_links(content) | remove_quotes, original_url);
+}
+
+auto extract_urls_from_doxygen_menu(std::string_view content, const std::string & original_url) {
+	constexpr auto split_by_url = ctre::split<R"/(,url:")/">;
+
+	constexpr auto remove_quotes = std::views::transform([](std::string_view in) -> std::optional<std::string> {
+		auto it = in.begin();
+		const auto end = in.end();
+
+		std::ostringstream buffer;
+
+		while (it != end) {
+			if (*it == '"') {
+				return buffer.str();
+			} else if (*it == '\\') {
+				++it;
+				if (it != end) {
+					// I know, but there won't be any new lines in urls probably unicode characters
+					buffer << *it++;
+				}
+			} else {
+				buffer << *it++;
+			}
+		}
+
+		return std::nullopt;
+	});
+
+	return normalize_and_filter_links(split_by_url(content) | std::views::drop(1) | remove_quotes, original_url);
 }
 
 struct url_content {
@@ -137,9 +197,12 @@ bool blocked_extensions(std::string_view url) noexcept {
 }
 
 template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::string requested_url, auto & check_link, auto & add_link, std::string referer, int attempts = 10) -> co_curl::promise<void> {
-	if (blocked_extensions(requested_url)) {
-		std::cerr << "skipped: " << requested_url << "\n";
-		co_return;
+	if (!requested_url.ends_with("menudata.js")) {
+		// menudata.js is doxygen generated menu
+		if (blocked_extensions(requested_url)) {
+			std::cerr << "skipped: " << requested_url << "\n";
+			co_return;
+		}
 	}
 
 	auto handle = co_curl::easy_handle{requested_url};
@@ -149,8 +212,8 @@ template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::s
 	// handle.verbose();
 	handle.follow_location();
 	handle.write_into(output);
-	handle.connection_timeout(std::chrono::seconds{3});
-	handle.low_speed_timeout(64, std::chrono::seconds{1});
+	// handle.connection_timeout(std::chrono::seconds{3});
+	// handle.low_speed_timeout(64, std::chrono::seconds{1});
 
 	for (;;) {
 		auto r = co_await handle.perform();
@@ -193,8 +256,17 @@ template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::s
 		std::cout << "redirected: " << requested_url << " -> " << final_url << "\n";
 	}
 
-	for (auto && url: extract_hrefs(output, final_url)) {
-		add_link(*info, std::move(url));
+	if (mime == "text/html" || final_url.ends_with(".htm") || final_url.ends_with(".html")) {
+		for (auto && url: extract_hrefs_from_html(output, final_url)) {
+			add_link(*info, std::move(url));
+		}
+	} else if (mime == "application/javascript" && final_url.ends_with("/menudata.js")) {
+		std::cout << "found doxygen menudata.js\n";
+		for (auto && url: extract_urls_from_doxygen_menu(output, final_url)) {
+			std::cout << url.url << "\n";
+			add_link(*info, std::move(url));
+		}
+		co_return;
 	}
 
 	if (!info->path.empty() && info->path.back() == '/') {
@@ -226,6 +298,12 @@ template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::s
 	if (convert) {
 		// crawle thru everything
 		const auto add_section = [&](size_t pos, std::string_view target) {
+			if (target.starts_with("mw-")) {
+				return;
+			}
+			if (target == "contentSub" || target == "siteSub" || target == "content") {
+				return;
+			}
 			doc.add_target(crawler::position_t{static_cast<uint32_t>(pos)}, std::string{target});
 		};
 
@@ -313,15 +391,19 @@ template <size_t N = 3> auto download_everything(std::set<std::string> urls, aut
 };
 
 [[maybe_unused]] constexpr auto cppreference = [](const auto & path) -> bool {
-	if (path.starts_with("/wiki_old/")) {
+	if (!path.starts_with("/w/")) {
 		return false;
 	}
-	if (path.starts_with("/mwiki/")) {
-		return false;
-	}
-	if (path.starts_with("/tmpw/")) {
-		return false;
-	}
+	// if (path.starts_with("/wiki_old/")) {
+	//	return false;
+	// }
+	// if (path.starts_with("/mwiki/")) {
+	//	return false;
+	// }
+	// if (path.starts_with("/tmpw/")) {
+	//	return false;
+	// }
+
 	if (ctre::starts_with<"/w/[A-Z][a-z0-9_]*+:">(path)) {
 		return false;
 	}
@@ -329,6 +411,10 @@ template <size_t N = 3> auto download_everything(std::set<std::string> urls, aut
 };
 
 [[maybe_unused]] constexpr auto llvm_docs = [](const auto & path) -> bool {
+	if (path.starts_with("/doxygen/")) {
+		return true;
+	}
+
 	if (!path.starts_with("/docs/")) {
 		return false;
 	}

@@ -3,3 +3,4 @@ build
 *.profraw
 c++draft
 index-*/
+*.tgz

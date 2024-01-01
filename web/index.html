@@ -270,11 +270,16 @@
 					const ngram_hits = await Promise.all(ngrams_for_word.map(async (ngram, offset) => {
 						// download
 						const entries = await download_index_for(ngram);
+						
+						if (entries === null) {
+							return entries;
+						}
+						
 						// and transform based on the offset of the ngram in current word
 						return entries.map((entry) => ({id: entry[0], position: entry[1] - offset}));
 					}));
 					
-					const sorted_ngram_hits = sort_by_length(ngram_hits);
+					const sorted_ngram_hits = sort_by_length(ngram_hits.filter(hit => hit !== null));
 					const hits = set_intersection(sorted_ngram_hits);
 					// we need to wait for all document list and then we produce list of unique documents for current word
 					return reduce_documents(hits, ngrams_for_word.length + size - 1);
@@ -368,7 +373,7 @@
 				let r = sections.reduce(target_intersection);
 				
 				if (r.length == 0) {
-					return undefined;
+					return [];
 				}
 				
 				if (r[0].target === "") {
@@ -384,12 +389,12 @@
 				// we intersect documents for each word to produce list of documents for search query
 				const results = document_intersection(await list_of_documents_for_each_word(words, size));
 				// download lists of targets... (but only for top N)
-				await Promise.all(results.slice(0, limit).map(async (doc) => { 
-					const targets = await download_targets_for(doc.id);
-					targets.unshift([0, ""]);
-					doc.targets = find_first_common_target(doc.positions, targets);
-					return doc;
-				}));
+				//await Promise.all(results.slice(0, limit).map(async (doc) => { 
+				//	const targets = await download_targets_for(doc.id);
+				//	targets.unshift([0, ""]);
+				//	doc.targets = find_first_common_target(doc.positions, targets);
+				//	return doc;
+				//}));
 				
 				return results;
 			}
@@ -398,6 +403,14 @@
 				const c = d3.hsl(d3.interpolateWarm(v));
 				c.l = (c.l + 2) / 3;
 				return c.formatHex();
+			}
+			
+			function timeout(ms) {
+			    return new Promise(resolve => setTimeout(resolve, ms));
+			}
+			
+			async function sleep(ms) {
+			    await timeout(ms);
 			}
 			
 			let search_counter = 0;
@@ -423,7 +436,7 @@
 					}
 					
 					first.forEach((entry) => {
-						const text = document.createTextNode(entry.url);
+						const text = document.createTextNode(decodeURIComponent(entry.url));
 						const a = document.createElement("a");
 					
 						let url = entry.url;
@@ -447,19 +460,46 @@
 						li.appendChild(a);
 						li.appendChild(count_info);
 						
-						entry.targets.forEach((target) => {
-							const target_info = document.createElement("a");
-							target_info.setAttribute("href",url + "#" + target);
-							target_info.setAttribute("target","_blank");
-							target_info.className = "target";
-							const hash = document.createTextNode("#");
-							const hash_span = document.createElement("span");
-							hash_span.appendChild(hash);
-							target_info.appendChild(hash_span);
-							const target_text = document.createTextNode(target);
-							target_info.appendChild(target_text);
-							li.appendChild(target_info);
+						text.search_link_targets = download_targets_for(entry.id).then(async (targets) => {
+							await sleep(Math.random() * 2000);
+							
+							targets.unshift([0, ""]);
+							
+							let common_targets = find_first_common_target(entry.positions, targets);
+							//console.log(common_targets);
+							common_targets.forEach((target) => {
+								const target_info = document.createElement("a");
+								target_info.setAttribute("href",url + "#" + target);
+								target_info.setAttribute("target","_blank");
+								target_info.className = "target";
+								const hash = document.createTextNode("#");
+								const hash_span = document.createElement("span");
+								hash_span.appendChild(hash);
+								target_info.appendChild(hash_span);
+								const target_text = document.createTextNode(target);
+								target_info.appendChild(target_text);
+								li.appendChild(target_info);
+							});
 						});
+						//	const targets = await download_targets_for(doc.id);
+						//	targets.unshift([0, ""]);
+						//	doc.targets = find_first_common_target(doc.positions, targets);
+						//	return doc;
+						
+						//console.log(entry)
+						//if (entry.targets) entry.targets.forEach((target) => {
+						//	const target_info = document.createElement("a");
+						//	target_info.setAttribute("href",url + "#" + target);
+						//	target_info.setAttribute("target","_blank");
+						//	target_info.className = "target";
+						//	const hash = document.createTextNode("#");
+						//	const hash_span = document.createElement("span");
+						//	hash_span.appendChild(hash);
+						//	target_info.appendChild(hash_span);
+						//	const target_text = document.createTextNode(target);
+						//	target_info.appendChild(target_text);
+						//	li.appendChild(target_info);
+						//});
 						
 						//if (targets != "#") {
 						//	const target_info = document.createElement("span");
@@ -487,7 +527,7 @@
 				
 			//update();
 		</script>
-		<input id="searchbox" placeholder="search C++ draft" type="search" autofocus autocorrect="off" autocapitalize="none"  oninput="search(this.value, search_result)"/>
+		<input id="searchbox" placeholder="search LLVM docs" type="search" autofocus autocorrect="off" autocapitalize="none"  oninput="search(this.value, search_result)"/>
 		<ol id="search_result">
 		</ol>
 		<script>

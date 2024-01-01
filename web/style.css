@@ -37,7 +37,8 @@ ol#search_result > li {
 	counter-increment: list;
 	list-style-type: none;
 	position: relative;
-	line-height: 28px;
+	line-height: 2.75ex;
+	height: 2.75ex;
 	font-size: 20px;
 }
 
@@ -51,6 +52,14 @@ ol#search_result li:before {
 }
 .search_result_div {
 	margin-top: 15px;
+}
+@keyframes fadein {
+    from {
+        opacity:0;
+    }
+    to {
+        opacity:1;
+    }
 }
 #search_result > li {
 	display: block;
@@ -84,12 +93,14 @@ ol#search_result li:before {
 	bottom: 3px;
 }
 
+
 #search_result > li > a.target {
 	font-size: 14px;
 	color: #cecece;
 	text-decoration: none;
 	padding-left: 0.5em;
 	font-family: Monaco, Mono, "Courier New";
+	animation: fadein 0.2s ease-in;
 }
 #search_result > li > a.target > span {
 	color: #989898;
