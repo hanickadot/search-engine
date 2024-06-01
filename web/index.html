@@ -593,7 +593,21 @@
 						output.appendChild(total_count_span)
 					}
 					
+					const words = text.split_to_words().filter((word) => word.length >= size);
 					
+					if (entries.length == 0 && (words.length == 0) && (text != "")) {
+						const total_count = document.createTextNode("(too short input)");
+						const total_count_span = document.createElement("span");
+						total_count_span.className = "empty";
+						total_count_span.appendChild(total_count);
+						output.appendChild(total_count_span)
+					} else if (entries.length == 0 && (words.length > 0)) {
+						const total_count = document.createTextNode("(no document found)");
+						const total_count_span = document.createElement("span");
+						total_count_span.className = "empty";
+						total_count_span.appendChild(total_count);
+						output.appendChild(total_count_span)
+					}
 					
 				});
 			}

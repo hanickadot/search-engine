@@ -92,6 +92,7 @@ auto extract_hrefs_from_html(std::string_view content, const std::string & origi
 		}
 
 		if (auto content = in.template get<"sg">()) {
+			std::cout << content << "\n";
 			return content;
 		}
 
@@ -209,7 +210,7 @@ template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::s
 
 	std::string output;
 
-	// handle.verbose();
+	handle.verbose();
 	handle.follow_location();
 	handle.write_into(output);
 	// handle.connection_timeout(std::chrono::seconds{3});
@@ -439,6 +440,10 @@ template <size_t N = 3> auto download_everything(std::set<std::string> urls, aut
 	return true;
 };
 
+[[maybe_unused]] constexpr auto timsong_cpp = []([[maybe_unused]] const auto & path) -> bool {
+	return true;
+};
+
 [[maybe_unused]] constexpr auto based_on_server = [](const url_and_path & info) -> bool {
 	if (info.host == "llvm.org") {
 		return llvm_docs(info.path);
@@ -446,6 +451,8 @@ template <size_t N = 3> auto download_everything(std::set<std::string> urls, aut
 		return cppreference(info.path);
 	} else if (info.host == "eel.is") {
 		return cpp_draft(info.path);
+	} else if (info.host == "timsong-cpp.github.io") {
+		return timsong_cpp(info.path);
 	} else {
 		return true;
 	}

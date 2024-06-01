@@ -121,6 +121,16 @@ ol#search_result li:before {
 	color: grey;
 	display: block;
 }
+#search_result span.empty {
+	position: relative;
+	left: -32px;
+	display: block;
+	font-size: 14px;
+	color: #cecece;
+	text-decoration: none;
+	padding-left: 0.5em;
+	font-family: Monaco, Mono, "Courier New";
+}
 #more_info {
 	font-size: 12px;
 	color: gray;
