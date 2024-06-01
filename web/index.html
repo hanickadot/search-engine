@@ -4,7 +4,7 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-		<title>search C++ standard draft</title>
+		<title>search Carbon documentation</title>
 		
 		<link rel="stylesheet" href="style.css">
 		<script src="d3.v7.js"></script>
@@ -76,6 +76,40 @@
 				return output;
 			}
 			
+			function substract_helper(lhs, rhs, compare) {
+				const lhs_it = lhs[Symbol.iterator]();
+				const rhs_it = rhs[Symbol.iterator]();
+				
+				let output = [];
+				
+				let left = lhs_it.next();
+				let right = rhs_it.next();
+				
+				while (!left.done && !right.done) {
+					const relationship = compare(left.value, right.value);
+					
+					if (relationship >= 0) {
+						right = rhs_it.next();
+					}
+					
+					if (relationship < 0) {
+						output.push(left.value);
+					}
+					
+					if (relationship <= 0) {
+						left = lhs_it.next();
+					}
+				}
+				
+				// copy rest of left side
+				while (!left.done) {
+					output.push(left.value);
+					left = lhs_it.next();
+				}
+				
+				return output;
+			}
+			
 			function intersection_helper(lhs, rhs, compare, merge, limit) {
 				const linear_cost = lhs.length + rhs.length;
 				const log_cost = lhs.length * Math.log(rhs.length);
@@ -119,8 +153,8 @@
 
 			
 			
-			const urls = fetch("index/urls.json", {cache: "force-cache"}).then((response) => response.json());
-			const outliers = fetch("index/outliers.json", {cache: "force-cache"}).then((response) => { 
+			const urls = fetch("index/urls.json").then((response) => response.json());
+			const outliers = fetch("index/outliers.json").then((response) => { 
 				if (response.status == 404) {
 					return [];
 				}
@@ -130,7 +164,7 @@
 			// this will download and map ngram with offset
 			async function download_index_for(ngram) {
 				const url = "index/leaves/"+ngram+".json";
-				const response = await fetch(url, {cache: "force-cache"});
+				const response = await fetch(url);
 				
 				if (response.status == 404) {
 					return [];
@@ -149,6 +183,7 @@
 			}
 			
 			async function download_targets_for(document_id) {
+				return [];
 				const url = "index/targets/"+format_document_target_id_file(document_id)+".json";
 				const response = await fetch(url, {cache: "force-cache"})
 				
@@ -166,6 +201,16 @@
 			
 			function sort_by_length(sets) {
 				return sets.sort((lhs, rhs) => (lhs.length - rhs.length));
+			}
+			
+			function sort_documents_by_negativity_and_length(sets) {
+				return sets.sort((lhs, rhs) => {
+					if (lhs.negative == rhs.negative) {
+						return (lhs.result.length - rhs.result.length);
+					} else {
+						return lhs.negative - rhs.negative;
+					}
+				});
 			}
 			
 			function set_intersection(sets) {
@@ -215,14 +260,24 @@
 						l.positions.push(r.positions[0]);
 						return l;
 					};
+					
+					if (!lhs.negative && rhs.negative) {
+						// TODO: substract rhs from lhs
+						return {result: substract_helper(lhs.result, rhs.result, compare), negative: false};
+					}
 				
-					return intersection_helper(lhs, rhs, compare, merge, 0);
+					return {result: intersection_helper(lhs.result, rhs.result, compare, merge, 0), negative: false};
 				};
 				
-				const sorted = sort_by_length(sets);
+				const sorted = sort_documents_by_negativity_and_length(sets);
+				if (sorted[0].negative) {
+					return [];
+				}
+				
+				const reduced = sorted.reduce(helper);
 				
 				// we don't need to sort documents as it's already sorted in the index
-				return sorted.reduce(helper).sort((lhs, rhs) => (rhs.ratio - lhs.ratio));
+				return reduced.result.sort((lhs, rhs) => (rhs.ratio - lhs.ratio));
 			}
 			
 			async function reduce_documents(sets, query_length) {
@@ -249,6 +304,8 @@
 							id: id,
 							url: (documents[id][0]),
 							ngrams: (documents[id][1]),
+							title: (documents[id][2]),
+							prefix: (documents[id][3]),
 							first_position: position,
 							positions: [[position]],
 							ratio: default_count / (documents[id][1])
@@ -349,13 +406,20 @@
 			
 			async function list_of_documents_for_each_word(words, size = 3) {
 				return Promise.all(words.map(async (word) => {
+					const negative = word.startsWith("-");
+					
+					if (negative) {
+						word = word.substr(1);
+					}
+					
 					// this access internet and download all ngrams indices for current word
 					const ngrams_from_query = word.ngrams(size);
 					const ngram_hits = await optimize_and_download(ngrams_from_query, outliers, size);
 					const sorted_ngram_hits = sort_by_length(ngram_hits.filter(hit => hit !== null));
 					const hits = set_intersection(sorted_ngram_hits);
 					// we need to wait for all document list and then we produce list of unique documents for current word
-					return reduce_documents(hits, ngrams_from_query.length + size - 1);
+					
+					return {word: word, negative: negative, result: await reduce_documents(hits, ngrams_from_query.length + size - 1)};
 				}));
 			}
 			
@@ -509,7 +573,7 @@
 					}
 					
 					first.forEach((entry) => {
-						const text = document.createTextNode(decodeURIComponent(entry.url));
+						const text = document.createTextNode(decodeURIComponent(entry.title != "" ? entry.title : entry.url));
 						const a = document.createElement("a");
 					
 						let url = entry.url;
@@ -520,6 +584,7 @@
 					
 						const li = document.createElement("li");
 					
+						
 						a.appendChild(text);
 					
 						const count_info = document.createElement("span");
@@ -531,6 +596,15 @@
 						
 						
 						li.appendChild(a);
+						
+						if (entry.title != "" && entry.prefix != "") {
+							const prefix_text = document.createTextNode(entry.prefix);
+							const prefix_text_span = document.createElement("span");
+							prefix_text_span.className = "prefix "+entry.prefix;
+							prefix_text_span.appendChild(prefix_text);
+							li.appendChild(prefix_text_span);
+						}
+						
 						li.appendChild(count_info);
 						
 						text.search_link_targets = download_targets_for(entry.id).then(async (targets) => {

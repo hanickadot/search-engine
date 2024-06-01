@@ -43,14 +43,16 @@ String.prototype.split_to_words = function() {
 		const c = this[i];
 		
 		if (state == state_type.text) {
-			if (c == ' ' && word.length > 0) {
+			if (c == ' ' && word.length == 0) {
+				continue;
+			} else if (c == ' ' && word.length > 0) {
 				output.push(word);
 				word = "";
 				continue;
-			} else if (c == '"' && word.length == 0) {
+			} else if (c == '"' && (word.length == 0 || word == "-")) {
 				state = state_type.double_quotes
 				continue;
-			} else if (c == "'" && word.length == 0) {
+			} else if (c == "'" && (word.length == 0 || word == "-")) {
 				state = state_type.quotes
 				continue;
 			} else {
