@@ -5,7 +5,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import socketserver
 import posixpath
 
-PORT = 8080
+PORT = 8000
 
 Handler = http.server.SimpleHTTPRequestHandler
 

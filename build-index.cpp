@@ -210,7 +210,7 @@ template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::s
 
 	std::string output;
 
-	handle.verbose();
+	// handle.verbose();
 	handle.follow_location();
 	handle.write_into(output);
 	// handle.connection_timeout(std::chrono::seconds{3});

@@ -559,7 +559,7 @@ std::vector<crawler::id_and_text> crawler::convert_to_plain_text_by_nearest_anch
 
 	const auto attribute_callback = [&output](std::string_view tag, std::string_view key, std::string_view value) {
 		if ((tag == "div" || tag == "span" || tag == "li") && key == "id") {
-			output.emplace_back(id_and_text{.id = std::string(value)});
+			output.emplace_back(id_and_text{.id = std::string(value), .text = ""});
 		}
 	};
 
