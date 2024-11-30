@@ -4,3 +4,4 @@ build
 c++draft
 index-*/
 *.tgz
+web/index*/

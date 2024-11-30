@@ -10,6 +10,7 @@
 #include <ranges>
 #include <set>
 #include <string>
+#include <thread>
 #include <csignal>
 
 static std::atomic<bool> stop_flag{false};
@@ -92,7 +93,7 @@ auto extract_hrefs_from_html(std::string_view content, const std::string & origi
 		}
 
 		if (auto content = in.template get<"sg">()) {
-			std::cout << content << "\n";
+			// std::cout << content << "\n";
 			return content;
 		}
 
@@ -206,6 +207,8 @@ template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::s
 		}
 	}
 
+	std::cout << "requesting " << requested_url << "\n";
+
 	auto handle = co_curl::easy_handle{requested_url};
 
 	std::string output;
@@ -231,15 +234,29 @@ template <size_t N = 3> auto fetch_recursive(crawler::index_t<N> & index, std::s
 			co_return;
 		}
 
+		if (handle.get_response_code() == 503) {
+			std::cerr << "HTTP " << handle.get_response_code() << ": " << requested_url << " (referer = " << referer << ") trying again after a while...\n";
+			std::this_thread::sleep_for(std::chrono::seconds{2});
+			continue;
+		}
+
 		if (handle.get_response_code() != co_curl::http_2XX) {
 			std::cerr << "HTTP " << handle.get_response_code() << ": " << requested_url << " (referer = " << referer << ")\n";
+
 			co_return;
 		}
 
 		break;
 	}
 
-	auto mime = handle.get_content_type();
+	auto mime = handle.get_content_type().transform([](std::string_view mime) {
+		auto [_, xmime] = ctre::starts_with<"([a-z\\-0-9]+/[a-z\\-0-9]+);">(mime);
+		if (!xmime) {
+			return mime;
+		}
+
+		return xmime.view();
+	});
 	auto final_url = std::string{handle.url()};
 	auto info = get_url_and_path(final_url);
 
