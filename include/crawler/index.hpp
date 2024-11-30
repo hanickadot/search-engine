@@ -78,7 +78,7 @@ template <size_t N> struct ngram_builder_t {
 	}
 
 	constexpr position_t position() const noexcept {
-		return position_t{pos.n - N};
+		return position_t{static_cast<uint32_t>(pos.n - N)};
 	}
 };
 
