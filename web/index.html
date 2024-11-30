@@ -5,7 +5,8 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
 		<title>search C++ draft</title>
-		
+		<link rel="icon" href="favicon.ico" type="image/x-icon" />
+				
 		<link rel="stylesheet" href="style.css">
 		<script src="d3.v7.js"></script>
 		<script src="string.js"></script>
@@ -151,10 +152,10 @@
 			}
 					
 
+			const prefix = "index-2024-11-30/";
 			
-			
-			const urls = fetch("index/urls.json").then((response) => response.json());
-			const outliers = fetch("index/outliers.json").then((response) => { 
+			const urls = fetch(prefix+"urls.json").then((response) => response.json());
+			const outliers = fetch(prefix+"outliers.json").then((response) => { 
 				if (response.status == 404) {
 					return [];
 				}
@@ -163,7 +164,7 @@
 			
 			// this will download and map ngram with offset
 			async function download_index_for(ngram) {
-				const url = "index/leaves/"+ngram+".json";
+				const url = prefix+"leaves/"+ngram+".json";
 				const response = await fetch(url);
 				
 				if (response.status == 404) {
@@ -184,7 +185,7 @@
 			
 			async function download_targets_for(document_id) {
 				return [];
-				const url = "index/targets/"+format_document_target_id_file(document_id)+".json";
+				const url = prefix+"targets/"+format_document_target_id_file(document_id)+".json";
 				const response = await fetch(url, {cache: "force-cache"})
 				
 				if (response.status == 404) {
@@ -559,21 +560,6 @@
 				console.log(input);
 			}
 			
-			function encodeFragment(text) {
-				return encodeURIComponent(text).replace("-","2D").replace("&","%26").replace(",","%2C");
-			}
-			
-			function get_text_fragment_for_terms(terms) {
-				const result = terms.map((term) => "text="+encodeFragment(term)).join("&");
-				
-				if (result != "") {
-					return "#:~:"+result;
-				} else {
-					return "";
-				}
-				
-			}
-			
 			async function search(text, output, limit = 99, size = 3) {
 				
 				const current_search = ++search_counter;
@@ -594,7 +580,7 @@
 					output.removeChild(output.firstChild);
 				}
 				
-				const fragment = get_text_fragment_for_terms(terms);
+				const fragment = (terms.length > 0) ? ("#:~:text=" + encodeURIComponent(terms[0])) : "";
 			
 				first.forEach((entry) => {
 					const text = document.createTextNode(decodeURIComponent((entry.title != "" && entry.title) ? entry.title : entry.url));
@@ -632,27 +618,28 @@
 				
 					li.appendChild(count_info);
 				
-					//text.search_link_targets = download_targets_for(entry.id).then(async (targets) => {
-					//	
-					//	targets.unshift([0, ""]);
-					//
-					//	let common_targets = find_first_common_target(entry.positions, targets);
-					//	//console.log(common_targets);
-					//	common_targets.forEach((target) => {
-					//		const target_info = document.createElement("a");
-					//		target_info.setAttribute("href","https://github.com/carbon-language/carbon-lang/blob/trunk/docs/"+url + "#" + target);
-					//		target_info.setAttribute("target","_blank");
-					//		target_info.setAttribute("rel","noopener");
-					//		target_info.className = "target";
-					//		const hash = document.createTextNode("#");
-					//		const hash_span = document.createElement("span");
-					//		hash_span.appendChild(hash);
-					//		target_info.appendChild(hash_span);
-					//		const target_text = document.createTextNode(target);
-					//		target_info.appendChild(target_text);
-					//		li.appendChild(target_info);
-					//	});
-					//});
+					text.search_link_targets = download_targets_for(entry.id).then(async (targets) => {
+						await sleep(Math.random() * 2000);
+					
+						targets.unshift([0, ""]);
+					
+						let common_targets = find_first_common_target(entry.positions, targets);
+						//console.log(common_targets);
+						common_targets.forEach((target) => {
+							const target_info = document.createElement("a");
+							target_info.setAttribute("href",url + "#" + target);
+							target_info.setAttribute("target","_blank");
+							target_info.setAttribute("rel","noopener");
+							target_info.className = "target";
+							const hash = document.createTextNode("#");
+							const hash_span = document.createElement("span");
+							hash_span.appendChild(hash);
+							target_info.appendChild(hash_span);
+							const target_text = document.createTextNode(target);
+							target_info.appendChild(target_text);
+							li.appendChild(target_info);
+						});
+					});
 					//	const targets = await download_targets_for(doc.id);
 					//	targets.unshift([0, ""]);
 					//	doc.targets = find_first_common_target(doc.positions, targets);
